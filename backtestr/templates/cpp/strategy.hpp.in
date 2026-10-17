@@ -1,0 +1,321 @@
+#pragma once
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <fstream>
+#include <iomanip>
+#include <iterator>
+#include <limits>
+#include <map>
+#include <set>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace backtestr {
+
+enum class Signal { SmaCross, Rsi, Momentum, BuyHold };
+// @GENERATED_CONFIGURATION@
+
+using Quantity = std::int64_t;
+using Day = std::chrono::sys_days;
+struct Bar { std::string date; double open{}, high{}, low{}, close{}, volume{}; };
+using History = std::map<std::string, std::vector<Bar>>;
+using Holdings = std::map<std::string, Quantity>;
+using Prices = std::map<std::string, double>;
+using Active = std::map<std::string, bool>;
+
+inline Day parse_day(const std::string& date) {
+    if (date.size() != 10 || date[4] != '-' || date[7] != '-') throw std::runtime_error("Invalid ISO date: " + date);
+    for (std::size_t i = 0; i < date.size(); ++i) {
+        if (i != 4 && i != 7 && (date[i] < '0' || date[i] > '9')) throw std::runtime_error("Invalid ISO date");
+    }
+    const auto value = std::chrono::year(std::stoi(date.substr(0, 4))) /
+        std::chrono::month(static_cast<unsigned>(std::stoi(date.substr(5, 2)))) /
+        std::chrono::day(static_cast<unsigned>(std::stoi(date.substr(8, 2))));
+    if (!value.ok() || value.year() < std::chrono::year(1)) throw std::runtime_error("Invalid calendar date: " + date);
+    return Day(value);
+}
+
+inline double number(const std::string& input) {
+    std::size_t consumed{};
+    const double value = std::stod(input, &consumed);
+    if (consumed != input.size() || !std::isfinite(value)) throw std::runtime_error("Invalid finite number in input");
+    return value;
+}
+
+inline Quantity quantity(double value) {
+    const double maximum = std::nextafter(static_cast<double>(std::numeric_limits<Quantity>::max()), 0.0);
+    if (!std::isfinite(value) || value < 0 || value > maximum) throw std::runtime_error("Share quantity exceeds safe integer range");
+    return static_cast<Quantity>(std::floor(value));
+}
+
+// Error-free partial summation keeps multi-symbol portfolio marks consistent
+// with Python math.fsum instead of making targets depend on accumulation order.
+inline double precise_sum(const std::vector<double>& values) {
+    std::vector<double> partials;
+    for (double value : values) {
+        std::size_t i{};
+        for (double other : partials) {
+            if (std::abs(value) < std::abs(other)) std::swap(value, other);
+            const double high = value + other;
+            const double low = other - (high - value);
+            if (low != 0) partials[i++] = low;
+            value = high;
+        }
+        partials.resize(i);
+        if (value != 0) partials.push_back(value);
+    }
+    if (partials.empty()) return 0;
+    std::size_t remaining = partials.size() - 1;
+    double high = partials[remaining], low{};
+    while (remaining) {
+        const double before = high, other = partials[--remaining];
+        high = before + other;
+        low = other - (high - before);
+        if (low != 0) break;
+    }
+    if (remaining && ((low < 0 && partials[remaining - 1] < 0) || (low > 0 && partials[remaining - 1] > 0))) {
+        const double twice = low * 2;
+        const double corrected = high + twice;
+        if (twice == corrected - high) high = corrected;
+    }
+    if (!std::isfinite(high)) throw std::runtime_error("Portfolio exceeded finite numeric range");
+    return high;
+}
+
+inline std::vector<std::string> csv_fields(const std::string& line) {
+    std::vector<std::string> fields;
+    std::string field;
+    bool quoted = false, closed = false;
+    for (std::size_t i = 0; i < line.size(); ++i) {
+        const char c = line[i];
+        if (c == '\r' && i + 1 == line.size() && !quoted) continue;
+        if (quoted) {
+            if (c == '"') {
+                if (i + 1 < line.size() && line[i + 1] == '"') { field += '"'; ++i; }
+                else { quoted = false; closed = true; }
+            } else field += c;
+        } else if (c == ',') { fields.push_back(field); field.clear(); closed = false; }
+        else if (c == '"' && field.empty() && !closed) quoted = true;
+        else if (closed || c == '"') throw std::runtime_error("Malformed CSV quoting");
+        else if (c != '\r') field += c;
+    }
+    if (quoted) throw std::runtime_error("Multiline or unclosed CSV field is unsupported");
+    fields.push_back(field);
+    return fields;
+}
+
+inline std::set<std::string> required_symbols() {
+    std::set<std::string> symbols;
+    for (const auto symbol : kSymbols) symbols.emplace(symbol);
+    symbols.emplace(kBenchmark);
+    return symbols;
+}
+
+inline void validate_history(const History& data) {
+    const auto symbols = required_symbols();
+    const std::vector<Bar>* reference = nullptr;
+    for (const auto& symbol : symbols) {
+        const auto found = data.find(symbol);
+        if (found == data.end() || found->second.empty()) throw std::runtime_error("Missing history for " + symbol);
+        const auto& bars = found->second;
+        for (std::size_t i = 0; i < bars.size(); ++i) {
+            const auto& bar = bars[i];
+            parse_day(bar.date);
+            if (i && bars[i - 1].date >= bar.date) throw std::runtime_error("Duplicate or unordered daily bar for " + symbol);
+            if (!std::isfinite(bar.open) || !std::isfinite(bar.high) || !std::isfinite(bar.low) || !std::isfinite(bar.close) || !std::isfinite(bar.volume) ||
+                bar.open < 1e-6 || bar.low < 1e-6 || bar.close < 1e-6 || bar.high > 1e12 || bar.high < std::max(bar.open, bar.close) ||
+                bar.low > std::min(bar.open, bar.close) || bar.high < bar.low || bar.volume < 0 || std::floor(bar.volume) != bar.volume)
+                throw std::runtime_error("Invalid OHLCV values for " + symbol + " on " + bar.date);
+        }
+        if (reference) {
+            if (reference->size() != bars.size()) throw std::runtime_error("Symbols and benchmark must have identical calendars");
+            for (std::size_t i = 0; i < bars.size(); ++i)
+                if ((*reference)[i].date != bars[i].date) throw std::runtime_error("Symbols and benchmark must have identical calendars");
+        } else reference = &bars;
+    }
+}
+
+inline History read_csv(std::istream& input) {
+    std::string line;
+    if (!std::getline(input, line)) throw std::runtime_error("CSV is empty");
+    if (line.starts_with("\357\273\277")) line.erase(0, 3);
+    const auto header = csv_fields(line);
+    std::map<std::string, std::size_t> columns;
+    for (std::size_t i = 0; i < header.size(); ++i)
+        if (!columns.emplace(header[i], i).second) throw std::runtime_error("Duplicate CSV column");
+    for (const std::string field : {"date", "symbol", "open", "high", "low", "close"})
+        if (!columns.contains(field)) throw std::runtime_error("Missing CSV column: " + field);
+    History data;
+    const auto required = required_symbols();
+    std::size_t count{};
+    while (std::getline(input, line)) {
+        if (line.empty() || line == "\r") continue;
+        if (++count > 5000000) throw std::runtime_error("CSV exceeds five million rows");
+        const auto fields = csv_fields(line);
+        if (fields.size() != header.size()) throw std::runtime_error("CSV row has wrong column count");
+        const std::string symbol = fields.at(columns.at("symbol"));
+        if (!required.contains(symbol)) continue;
+        const auto field = [&](const char* key) -> const std::string& { return fields.at(columns.at(key)); };
+        data[symbol].push_back({field("date"), number(field("open")), number(field("high")), number(field("low")), number(field("close")), columns.contains("volume") ? number(field("volume")) : 0.0});
+    }
+    for (auto& [symbol, bars] : data) {
+        (void)symbol;
+        std::sort(bars.begin(), bars.end(), [](const Bar& a, const Bar& b) { return a.date < b.date; });
+    }
+    validate_history(data);
+    return data;
+}
+
+inline std::size_t warmup() {
+    if (kSignal == Signal::SmaCross) return std::max(kFastWindow, kSlowWindow) - 1;
+    if (kSignal == Signal::Rsi || kSignal == Signal::Momentum) return kLookback;
+    return 0;
+}
+
+inline std::map<std::string, std::vector<bool>> signal_history(const History& data) {
+    std::map<std::string, std::vector<bool>> result;
+    for (const auto symbol_view : kSymbols) {
+        const std::string symbol(symbol_view);
+        const auto& bars = data.at(symbol);
+        auto& states = result[symbol];
+        states.assign(bars.size(), false);
+        bool state = false;
+        double gain_sum{}, loss_sum{};
+        std::size_t gain_count{}, loss_count{};
+        std::vector<double> gains(bars.size(), 0.0), losses(bars.size(), 0.0);
+        for (std::size_t i = 0; i < bars.size(); ++i) {
+            if (i) {
+                gains[i] = std::max(0.0, bars[i].close - bars[i - 1].close);
+                losses[i] = std::max(0.0, bars[i - 1].close - bars[i].close);
+                gain_sum += gains[i]; loss_sum += losses[i];
+                gain_count += gains[i] > 0;
+                loss_count += losses[i] > 0;
+                if (i > kLookback) {
+                    gain_sum -= gains[i - kLookback]; loss_sum -= losses[i - kLookback];
+                    gain_count -= gains[i - kLookback] > 0;
+                    loss_count -= losses[i - kLookback] > 0;
+                }
+                if (!gain_count) gain_sum = 0.0;
+                if (!loss_count) loss_sum = 0.0;
+            }
+            if (i < warmup()) continue;
+            if (kSignal == Signal::BuyHold) state = true;
+            else if (kSignal == Signal::SmaCross) {
+                // Center both means at the same close. Equal decimal prices
+                // then yield exact zero offsets, without a tolerance threshold.
+                std::vector<double> fast_offsets, slow_offsets;
+                fast_offsets.reserve(kFastWindow);
+                slow_offsets.reserve(kSlowWindow);
+                for (std::size_t j = i + 1 - kFastWindow; j <= i; ++j) fast_offsets.push_back(bars[j].close - bars[i].close);
+                for (std::size_t j = i + 1 - kSlowWindow; j <= i; ++j) slow_offsets.push_back(bars[j].close - bars[i].close);
+                state = precise_sum(fast_offsets) / static_cast<double>(kFastWindow) > precise_sum(slow_offsets) / static_cast<double>(kSlowWindow);
+            } else if (kSignal == Signal::Momentum) {
+                state = bars[i].close / bars[i - kLookback].close - 1.0 > kEntryThreshold;
+            } else {
+                const double gain = std::max(0.0, gain_sum), loss = std::max(0.0, loss_sum);
+                const double rsi = loss == 0 ? (gain == 0 ? 50.0 : 100.0) : 100.0 - 100.0 / (1.0 + gain / loss);
+                if (rsi <= kEntryThreshold) state = true;
+                else if (rsi >= kExitThreshold) state = false;
+            }
+            states[i] = state;
+        }
+    }
+    return result;
+}
+
+inline bool rebalance_due(const std::string& previous, const std::string& current) {
+    if (kRebalance == "daily") return true;
+    if (kRebalance == "monthly") return previous.substr(0, 7) != current.substr(0, 7);
+    const auto monday = [](Day day) { return day - std::chrono::days((std::chrono::weekday(day).c_encoding() + 6) % 7); };
+    return monday(parse_day(previous)) != monday(parse_day(current));
+}
+
+inline Holdings targets(const Active& active, const Prices& prices, double equity) {
+    if (!std::isfinite(equity) || equity < 0) throw std::runtime_error("Invalid account equity");
+    std::size_t count{};
+    for (const auto& [symbol, enabled] : active) { (void)symbol; if (enabled) ++count; }
+    const double weight = count ? std::min(kMaxPositionWeight, 1.0 / static_cast<double>(count)) : 0;
+    Holdings result;
+    for (const auto symbol_view : kSymbols) {
+        const std::string symbol(symbol_view);
+        if (!prices.contains(symbol) || !std::isfinite(prices.at(symbol)) || prices.at(symbol) <= 0) throw std::runtime_error("Invalid execution price");
+        result[symbol] = active.at(symbol) ? quantity(equity * weight / prices.at(symbol)) : 0;
+    }
+    return result;
+}
+
+struct Trade { std::string date, signal_date, symbol, side; Quantity shares{}; double price{}, commission{}; };
+struct EquityPoint { std::string date; double equity{}, cash{}; };
+struct Result { double cash{}; Holdings positions; std::vector<Trade> trades; std::vector<EquityPoint> equity; };
+
+inline Result replay(const History& data) {
+    validate_history(data);
+    const auto& calendar = data.at(std::string(kSymbols.front()));
+    const auto lower = std::lower_bound(calendar.begin(), calendar.end(), kStartDate, [](const Bar& bar, std::string_view day) { return bar.date < day; });
+    const auto upper = std::upper_bound(calendar.begin(), calendar.end(), kEndDate, [](std::string_view day, const Bar& bar) { return day < bar.date; });
+    if (lower == calendar.end() || lower >= upper) throw std::runtime_error("No bars inside configured test period");
+    const auto lo = static_cast<std::size_t>(lower - calendar.begin());
+    const auto hi = static_cast<std::size_t>(upper - calendar.begin() - 1);
+    if (lo < warmup()) throw std::runtime_error("Insufficient pre-period indicator warmup");
+    if (hi <= lo) throw std::runtime_error("At least two in-period trading sessions are required");
+    if ((parse_day(calendar[lo].date) - parse_day(std::string(kStartDate))).count() > 7 ||
+        (parse_day(std::string(kEndDate)) - parse_day(calendar[hi].date)).count() > 7)
+        throw std::runtime_error("Dataset does not cover the requested date range");
+    const auto signals = signal_history(data);
+    Result result;
+    result.cash = kInitialCash;
+    for (const auto symbol : kSymbols) result.positions[std::string(symbol)] = 0;
+    result.equity.push_back({calendar[lo].date, kInitialCash, kInitialCash});
+    const double slip = kSlippageBps / 10000.0, fee = kCommissionBps / 10000.0;
+    for (std::size_t i = lo + 1; i <= hi; ++i) {
+        if (i == lo + 1 || rebalance_due(calendar[i - 1].date, calendar[i].date)) {
+            Prices prices;
+            Active active;
+            std::vector<double> opening_values;
+            for (const auto symbol_view : kSymbols) {
+                const std::string symbol(symbol_view);
+                prices[symbol] = data.at(symbol)[i].open;
+                active[symbol] = signals.at(symbol)[i - 1];
+                opening_values.push_back(static_cast<double>(result.positions.at(symbol)) * prices.at(symbol));
+            }
+            const double opening_equity = result.cash + precise_sum(opening_values);
+            const auto target = targets(active, prices, opening_equity);
+            for (const auto& [symbol, desired] : target) {
+                const auto shares = std::max<Quantity>(0, result.positions.at(symbol) - desired);
+                if (shares == 0) continue;
+                const double price = prices.at(symbol) * (1.0 - slip);
+                const double commission = static_cast<double>(shares) * price * fee;
+                result.cash += static_cast<double>(shares) * price - commission;
+                result.positions.at(symbol) -= shares;
+                result.trades.push_back({calendar[i].date, calendar[i - 1].date, symbol, "sell", shares, price, commission});
+            }
+            for (const auto& [symbol, desired] : target) {
+                const double price = prices.at(symbol) * (1.0 + slip);
+                const auto affordable = quantity(std::max(0.0, result.cash) / (price * (1.0 + fee)));
+                const auto shares = std::min(affordable, std::max<Quantity>(0, desired - result.positions.at(symbol)));
+                if (shares == 0) continue;
+                const double commission = static_cast<double>(shares) * price * fee;
+                result.cash -= static_cast<double>(shares) * price + commission;
+                if (result.cash < -0.000001) throw std::runtime_error("Cash invariant violated");
+                result.cash = std::max(0.0, result.cash);
+                result.positions.at(symbol) += shares;
+                result.trades.push_back({calendar[i].date, calendar[i - 1].date, symbol, "buy", shares, price, commission});
+            }
+        }
+        std::vector<double> closing_values;
+        for (const auto& [symbol, shares] : result.positions) closing_values.push_back(static_cast<double>(shares) * data.at(symbol)[i].close);
+        const double equity = result.cash + precise_sum(closing_values);
+        result.equity.push_back({calendar[i].date, equity, result.cash});
+    }
+    return result;
+}
+
+} // namespace backtestr

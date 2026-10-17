@@ -1,0 +1,33 @@
+name: Verify research engine and C++ export
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  research-and-export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install optional paper adapter build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev nlohmann-json3-dev
+      - name: Test interpretation, data, accounting, HTTP, and C++ parity
+        run: python -m unittest discover -s tests -v
+      - name: Generate actual export project
+        run: python scripts/export_ci.py artifacts/cpp
+      - name: Compile replay, core tests, and optional paper adapter
+        run: cmake -S artifacts/cpp -B artifacts/cpp/build -DCMAKE_BUILD_TYPE=Release -DBACKTESTR_ALPACA_PAPER=ON
+      - name: Build
+        run: cmake --build artifacts/cpp/build --parallel 2
+      - name: Verify core
+        run: ctest --test-dir artifacts/cpp/build --output-on-failure
+      - name: Replay the exported study
+        run: artifacts/cpp/build/backtestr_replay artifacts/cpp/bars.csv
+      - name: Verify installed package includes assets and templates
+        run: |
+          python -m pip install --no-deps .
+          cd /tmp
+          python -c "from backtestr.codegen import preview_source; from backtestr.strategy import default_spec; assert 'kSymbols' in preview_source(default_spec())"

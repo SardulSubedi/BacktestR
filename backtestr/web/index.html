@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#173e33">
+  <title>BacktestR — Strategy research</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#description">Skip to strategy</a>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="BacktestR home"><img src="/favicon.svg" alt="" width="31" height="31">Backtest<span>R</span></a>
+    <span class="topbar-divider"></span><span class="workspace-name">Research workspace</span>
+    <div class="topbar-end"><span class="local-indicator"><span class="status-dot"></span> Running locally</span><a href="https://github.com/SardulSubedi/BacktestR" target="_blank" rel="noopener noreferrer" class="text-link">Repository <span aria-hidden="true">↗</span></a></div>
+  </header>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Workspace navigation">
+      <div class="sidebar-label">Workspace</div>
+      <nav>
+        <button class="nav-item active" data-view="lab" aria-current="page"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 19V5m0 14h16M8 15l4-6 4 3 4-7"/></svg>Strategy lab</button>
+        <button class="nav-item" data-view="data"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v7c0 4 16 4 16 0V5M4 12v7c0 4 16 4 16 0v-7"/></svg>Market data</button>
+        <button class="nav-item" data-view="guide"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v15M3 4c4-1 6-1 9 1 3-2 5-2 9-1v15c-4-1-6-1-9 1-3-2-5-2-9-1z"/></svg>How it works</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="connection-title">Connections</div>
+        <div class="connection"><span id="ai-dot" class="status-dot muted"></span><span id="ai-status">Checking interpreter</span></div>
+        <div class="connection"><span id="alpaca-dot" class="status-dot muted"></span><span id="alpaca-status">Checking Alpaca</span></div>
+        <p>Credentials stay on your computer.</p>
+      </div>
+    </aside>
+    <main id="main">
+      <section id="view-lab" class="view">
+        <div class="page-heading"><div><h1>Strategy lab<span class="heading-dot">.</span></h1><p>Start with an idea. Put the evidence to work.</p></div><div class="heading-actions"><button class="button quiet" id="open-strategy">Open strategy</button><button class="button secondary" id="new-study">New study <span aria-hidden="true">+</span></button></div></div>
+        <div class="lab-grid">
+          <section class="composer paper" aria-labelledby="composer-title">
+            <div class="section-heading"><h2 id="composer-title">Your investment idea</h2><span id="provider-label" class="badge">Local parser</span></div>
+            <p class="muted-text">Describe what to buy, when to trade, and how much to allocate. We’ll make the rules explicit.</p>
+            <form id="idea-form">
+              <label class="field-label" for="description">Strategy description</label>
+              <textarea id="description" rows="8" maxlength="12000" placeholder="For example: Trade AAPL and MSFT when the 20-day moving average is above the 100-day moving average…" required></textarea>
+              <div class="input-meta"><span>Plain English or precise rules</span><span id="character-count">0 / 12,000</span></div>
+              <div class="examples"><span>Try an idea</span><div class="example-buttons"><button type="button" data-example="trend">Trend following</button><button type="button" data-example="rsi">Mean reversion</button><button type="button" data-example="hold">Buy &amp; hold</button></div></div>
+              <div class="form-row provider-row"><label for="provider">Interpreter</label><select id="provider"><option value="auto">Automatic</option><option value="local">Local rule parser</option><option value="openai">OpenAI</option></select></div>
+              <button class="button primary wide" type="submit" id="interpret-button">Build strategy <span aria-hidden="true">→</span></button>
+            </form>
+            <div id="interpret-feedback" class="feedback" role="status" aria-live="polite" hidden></div>
+            <form id="clarification-form" class="clarifications" hidden><h3>A few details to resolve</h3><p class="muted-text">These choices change the strategy. Tell us what you intend.</p><div id="questions"></div><button class="button primary wide" type="submit" id="answer-button">Apply answers <span aria-hidden="true">→</span></button></form>
+            <section id="strategy-review" class="strategy-review" hidden aria-labelledby="review-title">
+              <div class="section-heading"><h3 id="review-title">Review the rules</h3><button class="text-button" id="save-strategy">Save JSON</button></div>
+              <p id="strategy-summary"></p><div id="rule-summary" class="rule-summary"></div>
+              <details class="spec-details"><summary>Edit the specification</summary><div id="spec-fields" class="spec-fields"></div><button class="button secondary wide" id="apply-spec" type="button">Apply specification changes</button></details>
+              <div class="assumptions"><h4>Assumptions &amp; execution</h4><ul id="assumption-list"></ul></div>
+              <label class="check-label"><input id="acknowledge" type="checkbox"><span>I’ve reviewed the rules and assumptions.</span></label>
+              <div class="dataset-picker"><label class="field-label" for="dataset-select">Market data</label><select id="dataset-select"><option value="demo">Synthetic demonstration data</option></select><p id="dataset-caption" class="small-text"></p><button class="text-button" id="go-data">Import CSV or connect Alpaca <span aria-hidden="true">→</span></button></div>
+              <button class="button primary wide" id="run-button" disabled>Run backtest <span aria-hidden="true">→</span></button>
+            </section>
+          </section>
+          <section class="results paper" aria-labelledby="results-title">
+            <div class="report-header"><div class="section-heading"><h2 id="results-title">Research report</h2><span id="report-state" class="badge neutral">No study yet</span></div><p id="report-subtitle">An honest view of your strategy, across time.</p></div>
+            <div id="report-empty" class="report-empty"><svg class="empty-plot" viewBox="0 0 450 150" role="img" aria-label="An empty chart waiting for your first study"><path class="grid-line" d="M20 25h410M20 65h410M20 105h410M20 140h410"/><path class="empty-line" d="M20 122 55 115 90 121 125 94 160 100 195 79 230 86 265 53 300 61 335 44 370 53 405 22 430 30"/><circle cx="430" cy="30" r="5"/></svg><h3>A hypothesis, then a test.</h3><p>Build a strategy on the left. Your portfolio, performance, and robustness checks will appear here.</p><div class="empty-steps"><span>Describe</span><span aria-hidden="true">→</span><span>Clarify</span><span aria-hidden="true">→</span><span>Test</span><span aria-hidden="true">→</span><span>Export</span></div><div class="evidence-note">Demo data is synthetic. Import historical prices for a real research study.</div></div>
+            <div id="report-loading" class="report-loading" role="status" hidden><div class="loading-line"></div><h3>Putting the rules to the test</h3><p>Simulating next-open execution, independent periods, and higher trading costs.</p></div>
+            <div id="report-content" hidden>
+              <div id="report-provenance" class="provenance"></div>
+              <div class="report-tabs" role="tablist" aria-label="Report sections"><button id="tab-overview" role="tab" aria-selected="true" aria-controls="panel-overview" tabindex="0" data-tab="overview">Overview</button><button id="tab-robustness" role="tab" aria-selected="false" aria-controls="panel-robustness" tabindex="-1" data-tab="robustness">Robustness</button><button id="tab-trades" role="tab" aria-selected="false" aria-controls="panel-trades" tabindex="-1" data-tab="trades">Trade log</button><button id="tab-code" role="tab" aria-selected="false" aria-controls="panel-code" tabindex="-1" data-tab="code">C++ export</button></div>
+              <section id="panel-overview" class="tab-panel" role="tabpanel" aria-labelledby="tab-overview"><div class="chart-heading"><h3>Growth of your portfolio</h3><span id="chart-value" class="small-text">Hover to inspect</span></div><div class="chart-legend"><span><i class="legend-mark strategy-mark"></i> Strategy</span><span><i class="legend-mark benchmark-mark"></i> <span id="benchmark-name">Benchmark</span></span><span id="chart-range"></span></div><div id="equity-chart" class="chart-container"></div><div class="metric-grid" id="metrics"></div><div class="portfolio-heading"><h3>Portfolio at period end</h3><span class="small-text">Marked at the last close</span></div><div id="portfolio"></div><details class="report-notes"><summary>Methodology &amp; limitations</summary><ul id="report-warnings"></ul></details><button class="text-button download-report">Download full report JSON <span aria-hidden="true">↓</span></button></section>
+              <section id="panel-robustness" class="tab-panel" role="tabpanel" aria-labelledby="tab-robustness" hidden><div class="section-intro"><h3>Does the result hold up?</h3><p>Look for consistency across periods and sensitivity to costs. No parameters are optimized on the holdout.</p></div><div id="robustness"></div></section>
+              <section id="panel-trades" class="tab-panel" role="tabpanel" aria-labelledby="tab-trades" hidden><div class="section-intro"><h3>Every simulated fill</h3><p>Orders use the previous completed day’s signal. Prices include slippage; commission is charged separately.</p></div><div id="trade-table"></div><div class="pagination"><button class="button quiet" id="trades-prev">← Previous</button><span id="trade-page" class="small-text"></span><button class="button quiet" id="trades-next">Next →</button></div><button class="text-button" id="download-trades">Download trade log CSV <span aria-hidden="true">↓</span></button></section>
+              <section id="panel-code" class="tab-panel" role="tabpanel" aria-labelledby="tab-code" hidden><div class="section-intro"><h3>From rules to executable code.</h3><p>A generated C++20 project with your strategy, the study data, a CSV replay engine, and an optional Alpaca paper adapter.</p></div><div class="code-facts"><span>C++20</span><span>CMake</span><span>Whole shares · long only</span></div><div class="code-toolbar"><span>strategy.hpp</span><button class="text-button" id="copy-code">Copy source</button></div><pre class="code-preview"><code id="source-preview">Loading generated strategy…</code></pre><div class="code-note"><strong>Replay and paper execution</strong><p>The default executable replays CSV data locally. The optional Alpaca adapter requires libcurl, a JSON library, and paper credentials. Read the generated README for execution differences and operational prerequisites. This export does not place live-money orders.</p></div><button class="button primary wide" id="export-button">Download C++ project <span aria-hidden="true">↓</span></button><p class="small-text">No AI call occurs in the C++ trading loop. Daily-bar strategies do not establish high-frequency performance.</p></section>
+            </div>
+          </section>
+        </div>
+      </section>
+      <section id="view-data" class="view" hidden>
+        <div class="page-heading"><div><h1>Market data<span class="heading-dot">.</span></h1><p>The quality of a study starts with its inputs.</p></div><button class="button secondary return-lab">Back to strategy lab →</button></div>
+        <div class="data-grid"><section class="paper data-section"><h2>Import daily prices</h2><p>Upload a long-format CSV with a row for each symbol and trading day. Include the benchmark and sufficient history before the test starts.</p><label class="field-label" for="csv-file">OHLCV file · up to 15 MB</label><input id="csv-file" type="file" accept=".csv,text/csv"><label class="field-label" for="adjustment">Price basis</label><select id="adjustment"><option value="unknown">Unknown / unverified</option><option value="split">Split-adjusted</option><option value="all">Split &amp; dividend adjusted</option><option value="raw">Unadjusted</option></select><p class="small-text">All OHLC values must use the same adjustment basis. Historical split-adjusted prices are a research approximation to executable prices.</p><button class="button primary wide" id="upload-csv">Import CSV</button><div class="csv-format"><h3>Required columns</h3><code>date,symbol,open,high,low,close,volume</code><p>Dates: YYYY-MM-DD. Prices: positive, finite numbers. No duplicate dates or missing sessions between symbols.</p><a href="/api/sample.csv" class="text-link" download>Download synthetic example CSV ↓</a></div></section>
+        <section class="paper data-section"><div class="section-heading"><h2>Fetch from Alpaca</h2><span id="data-alpaca-badge" class="badge neutral">Not configured</span></div><p>Fetch daily bars for the reviewed strategy and its benchmark, including indicator warmup history.</p><div class="setup-command"><code>APCA_API_KEY_ID=…<br>APCA_API_SECRET_KEY=…<br>ALPACA_DATA_FEED=iex</code></div><p class="small-text">Set these in your local .env, then restart the server. Never paste credentials into the strategy description. Data access depends on your subscription; IEX covers one exchange.</p><button class="button secondary wide" id="fetch-alpaca">Fetch strategy history</button><div class="dataset-info"><h3>Loaded dataset</h3><div id="loaded-dataset"></div></div></section></div><div id="data-feedback" class="feedback" role="status" aria-live="polite" hidden></div>
+      </section>
+      <section id="view-guide" class="view" hidden>
+        <div class="page-heading"><div><h1>Understand your study<span class="heading-dot">.</span></h1><p>The decisions behind the numbers.</p></div><button class="button secondary return-lab">Back to strategy lab →</button></div>
+        <article class="paper guide"><h2>Make the idea precise</h2><p>The interpreter turns your description into a constrained strategy specification. It asks about material gaps, lists assumptions, and rejects unsupported rules. Review the specification before running it. With an OpenAI API key, interpretation uses AI; without one, a conservative local parser handles the supported examples.</p><h3>Supported in this version</h3><ul><li><strong>SMA trend:</strong> hold each symbol while its fast simple moving average is above its slow moving average.</li><li><strong>RSI mean reversion:</strong> enter at or below the entry threshold; exit at or above the exit threshold. RSI uses rolling mean gains and losses, rather than Wilder smoothing.</li><li><strong>Momentum:</strong> hold each symbol when its trailing price return exceeds the threshold.</li><li><strong>Buy &amp; hold:</strong> allocate to all selected symbols on the first eligible execution day.</li></ul><p>Active symbols receive equal weights, subject to the position cap. Unallocated capital stays in cash. Positions use whole shares, with no shorting or leverage. Extra conditions, stop losses, arbitrary weights, options, and intraday triggers are outside the first version’s rule language.</p><h2>Keep time honest</h2><p>The engine sees only completed daily bars. A signal at day t’s close can first trade at day t+1’s open. The first selected date is the initial-cash baseline; indicator warmup uses earlier history. Positions remain open at the final close. Slippage and commission are charged on each fill.</p><h2>Challenge the result</h2><p>The report includes a chronological development/holdout split, annual and rolling periods, higher transaction-cost scenarios, and a seeded block-bootstrap estimate. These are diagnostics of one fixed strategy. Repeatedly changing the rules after viewing results weakens the holdout.</p><p>Historical prices, corporate actions, delisted stocks, point-in-time membership, trading halts, liquidity, taxes, spreads, and execution details all affect results. A selected current-stock universe can have survivorship bias. Returns are research estimates, not proof of an edge.</p><h2>Inspect the export</h2><p>C++ export uses deterministic templates and the reviewed specification. The default project builds a CSV replay executable. Its optional paper adapter has a separate dependency and credential setup, with additional order and risk checks. Paper limit-on-open orders differ from the simulation’s next-open fills. Read the bundle’s operational notes before deploying it.</p><h3>Start locally</h3><pre><code>python -m backtestr
+python -m unittest discover -s tests</code></pre><p>Connection configuration lives in .env. The server binds to 127.0.0.1 and is intended for a single user on their own computer.</p><a class="text-link" href="https://developers.openai.com/api/docs/guides/structured-outputs" target="_blank" rel="noopener noreferrer">OpenAI structured-output documentation ↗</a><br><a class="text-link" href="https://docs.alpaca.markets/us/docs/paper-trading" target="_blank" rel="noopener noreferrer">Alpaca paper-trading documentation ↗</a></article>
+      </section>
+      <footer class="workspace-footer"><span>BacktestR / Research before execution.</span><span>Historical results do not predict future returns.</span></footer>
+    </main>
+  </div>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <input id="strategy-file" type="file" accept=".json,application/json" hidden>
+</body>
+</html>

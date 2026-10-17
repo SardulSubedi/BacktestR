@@ -1,0 +1,19 @@
+{
+  "name": "Daily SMA 20 / 100",
+  "description": "Equal-weight AAPL and MSFT while the 20-day simple moving average exceeds the 100-day simple moving average.",
+  "symbols": ["AAPL", "MSFT"],
+  "benchmark": "SPY",
+  "signal": "sma_cross",
+  "fast_window": 20,
+  "slow_window": 100,
+  "lookback": 14,
+  "entry_threshold": 30.0,
+  "exit_threshold": 70.0,
+  "initial_cash": 100000.0,
+  "max_position_weight": 0.5,
+  "rebalance": "daily",
+  "commission_bps": 1.0,
+  "slippage_bps": 5.0,
+  "start_date": "2020-01-01",
+  "end_date": "2025-12-31"
+}

@@ -1,0 +1,129 @@
+# BacktestR generated C++20 strategy
+
+This bundle contains the exact typed strategy in `strategy.json`, its generated
+`strategy.hpp`, a reproducible CSV replay executable, and an optional Alpaca
+**paper trading** executable. No live-money endpoint is included. Compile and
+verify the replay before deploying the paper executable on your own machine.
+Daily strategies do not establish high frequency or exchange latency guarantees.
+
+## Build and replay
+
+Use GCC 12+, Clang 15+, or Visual Studio 2022 with C++20 and CMake 3.20+:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+./build/backtestr_replay bars.csv --trades trades.csv --equity equity.csv
+```
+
+On a Visual Studio generator the executable is `build/Release/backtestr_replay.exe`.
+The last line on stdout is JSON with final equity, fractional return, cash,
+trade count, and positions. Optional CSV outputs expose every fill and daily
+equity point for comparison with the Python research engine.
+
+CSV columns are `date,symbol,open,high,low,close,volume`, with one row per symbol
+and trading date. The replay accepts missing volume as zero; the research app
+requires volume. All strategy symbols **and the benchmark** need identical,
+complete calendars. Extra symbols are ignored. Invalid prices, non-finite
+numbers, duplicate bars, calendar gaps across symbols, and insufficient warmup
+fail closed. It does not invent missing market prices. If supplied at export,
+`bars.csv` and `data_provenance.json` retain the research inputs and provenance.
+Synthetic inputs demonstrate the software and cannot establish profitability.
+
+## Defined strategy and replay semantics
+
+Signals use completed daily closes. The first in-period date is a cash-only
+baseline; its close produces the first eligible order at the next session's
+open. History before the test period supplies indicator warmup. No current close
+can affect that day's opening fill. Rebalancing is daily, the first session of
+each ISO week, or the first session of each month; the first eligible replay fill
+is always scheduled. End-date holdings remain open and are valued at that close.
+
+* SMA: active when arithmetic fast SMA exceeds arithmetic slow SMA.
+* Momentum: active when `close / close[lookback sessions ago] - 1` strictly exceeds
+  `entry_threshold`, expressed as a fraction. `exit_threshold` is unused.
+* RSI: arithmetic rolling gains/losses over `lookback` close changes, **not Wilder
+  smoothing**. Enter at or below entry; exit at or above exit; retain state
+  between thresholds. Flat changes produce RSI 50; gains without losses produce
+  RSI 100. State starts inactive at the first computable supplied history bar.
+* Buy and hold: active throughout.
+
+Active symbols receive equal portfolio weights capped by
+`max_position_weight`, leaving unused cash. Integer long-only targets use
+pre-trade opening equity and the unadjusted execution open in the supplied price
+basis. Excess shares are sold in symbol order, then buys are capped by available
+cash in symbol order. Slippage moves fills against the strategy; commissions
+apply to fill notional on each side. There is no borrowing or shorting. Fixed
+symbol universes carry selection/survivorship risk. Price-adjusted data does not
+model dividends as separate cash, taxes, halts, spread dynamics, market impact,
+auction liquidity, or corporate-action processing in a brokerage account.
+
+## Optional Alpaca paper deployment
+
+Install libcurl with TLS support and nlohmann_json 3.10+ using your system package
+manager or vcpkg, then configure their CMake package paths if necessary:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBACKTESTR_ALPACA_PAPER=ON
+cmake --build build --config Release
+# Set these environment variables securely to PAPER account credentials:
+# APCA_API_KEY_ID
+# APCA_API_SECRET_KEY
+./build/backtestr_paper
+./build/backtestr_paper --submit-paper --state-dir /persistent/backtestr-paper-state
+```
+
+The first command previews the complete order plan without creating orders.
+Only `--submit-paper` can POST orders. Keep credentials out of source, CSVs,
+shell histories, screenshots, and the research application's prompts. Use a
+dedicated, unleveraged **paper account for this strategy**, and retain the same
+persistent state directory for every run. One process/host must own the account.
+The aliases `ALPACA_API_KEY` and `ALPACA_SECRET_KEY` are also accepted; canonical
+`APCA_` variables take precedence. The executable reads process environment
+variables, not the research application's `.env` file automatically.
+
+`start_date` and `end_date` bound historical CSV replay only. The optional paper
+executable deliberately trades the broker's **current next session** using the
+same signal parameters, universe, rebalance schedule, and capital ceiling; it
+does not stop at the historical research end date. Review the printed auction
+date and order plan before submitting each paper session.
+
+Run after 19:00 ET on the last completed session or before 09:28 ET on the next
+session. The broker clock/calendar establish that session, including holidays.
+The executable fetches all required symbols and the benchmark from the exported
+history start date (2010-01-01 when no data was attached), using paginated Alpaca
+IEX daily bars with `adjustment=split`. Each symbol must end on the exact previous
+completed exchange session. The IEX feed covers one exchange; research performed
+with consolidated or differently adjusted CSVs may produce different signals.
+RSI is stateful, so its starting history and price basis must also match. No
+profitability, performance, or signal parity is established by a successful build.
+
+Before submission it rejects blocked accounts, negative cash, unknown holdings,
+short/fractional shares, open orders, untradeable assets, missing or unfinished
+bars, duplicate client order IDs, and account changes during preflight. Targets
+use completed closes and the smaller of current account equity or the strategy's
+`initial_cash` capital ceiling. It submits **limit-on-open**
+orders with buy limits 2% above the last close and sell limits 2% below it. Buys
+reserve 1% of existing cash plus configured commission; they never assume sale
+proceeds will fill. These bounds intentionally differ from the replay's market
+open model. Gaps can leave orders unfilled, sells may fail while buys fill, and
+achieved weights can differ from targets. Position weights are estimates until
+the auction completes. Inspect each auction and reconcile actual fills, cash,
+positions, and corporate actions before the next run.
+
+Every order uses a deterministic strategy/session/symbol/side client ID. An
+atomic per-session local claim and flushed journal prevent automatic replay after
+partial failure. A failed or ambiguous POST stops submission immediately, with
+the claim retained. **Never delete the claim or change the strategy to bypass a
+failure:** inspect `journal.jsonl` and Alpaca's order history, reconcile any
+accepted/fill/canceled orders, and resolve the account manually. There is no
+automatic cancellation, fill reconciliation daemon, or unattended recovery.
+Scheduling, process supervision, account exclusivity, and monitoring are deployment
+responsibilities. Start with dry previews and paper sessions. A live broker,
+streaming execution, resilient state reconciliation, and live operational review
+require additional engineering before any real-money use.
+
+Broker behavior follows Alpaca's official [orders documentation](https://docs.alpaca.markets/us/docs/orders-at-alpaca),
+[client order IDs](https://docs.alpaca.markets/us/docs/working-with-orders), and
+[historical bars API](https://docs.alpaca.markets/us/reference/stockbars).
